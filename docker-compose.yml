@@ -1,0 +1,57 @@
+version: "3"
+
+volumes:
+  streamlit_postgres_data: {}
+  streamlit_postgres_data_backups: {}
+
+services:
+  streamlit: &streamlit
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: streamlit-app
+    container_name: streamlit-app
+    platform: linux/x86_64
+    depends_on:
+      - redis
+    volumes:
+      - ./src:/app:z
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://:redis-stack@streamlit-redis:6379}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://:redis-stack@streamlit-redis:6379}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://:redis-stack@streamlit-redis:6379}
+      - FLOWER_URL=${FLOWER_URL:-http://flower:5555/api}
+    ports:
+      - "8501:8501"
+    command: /start-streamlit.sh
+
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: streamlit-redis
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+    environment:
+      - REDIS_ARGS=--requirepass redis-stack
+      - REDISTIMESERIES_ARGS=RETENTION_POLICY=20
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  worker:
+    <<: *streamlit
+    image: streamlit-worker
+    container_name: streamlit-worker
+    depends_on:
+      - redis
+    ports: []
+    command: /start-worker.sh
+
+  flower:
+    <<: *streamlit
+    image: streamlit-flower
+    container_name: streamlit-flower
+    ports:
+      - "5555:5555"
+    command: /start-flower.sh
